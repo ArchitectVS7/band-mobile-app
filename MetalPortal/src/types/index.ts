@@ -46,30 +46,30 @@ export * from './chat';
 // Event types
 export * from './event';
 
+// TODO: Fix type exports after Phase 3 completion
 // API types (excluding conflicting ones)
-export type {
-  ApiError,
-  ApiClient,
-  ApiEndpoint,
-  ApiConfig,
-  PaginatedResponse,
-  SortOrder,
-  FilterParams
-} from './api';
+// export type {
+//   ApiError,
+//   ApiClient,
+//   ApiEndpoints,
+//   ApiResponse,
+//   PaginationParams,
+//   SearchParams
+// } from './api';
 
 // Common types (excluding conflicting ones)
-export type {
-  BaseEntity,
-  Timestamps,
-  PaginationParams,
-  SearchParams,
-  FileUpload,
-  ImageUpload,
-  VideoUpload,
-  AudioUpload,
-  ErrorResponse,
-  SuccessResponse,
-  ValidationError,
-  Permission,
-  RolePermission
-} from './common';
+// export type {
+//   BaseEntity,
+//   Timestamps,
+//   PaginationParams,
+//   SearchParams,
+//   FileUpload,
+//   ImageUpload,
+//   VideoUpload,
+//   AudioUpload,
+//   ErrorResponse,
+//   SuccessResponse,
+//   ValidationError,
+//   Permission,
+//   RolePermission
+// } from './common';
