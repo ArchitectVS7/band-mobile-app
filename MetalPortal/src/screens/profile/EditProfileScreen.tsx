@@ -50,6 +50,7 @@ import { useAuthStore } from '../../store/authStore';
 import { ProfileStackParamList } from '../../navigation/types';
 import { UpdateUserProfile } from '../../types/user';
 import { isValidEmail } from '../../utils/validation';
+import { updateUserAvatar, AvatarUploadProgress } from '../../utils/avatarUpload';
 
 // ========================
 // TYPES & INTERFACES
@@ -132,6 +133,8 @@ export const EditProfileScreen: React.FC = () => {
   const [isFormValid, setIsFormValid] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<AvatarUploadProgress | null>(null);
 
   // ========================
   // EFFECTS
@@ -243,9 +246,32 @@ export const EditProfileScreen: React.FC = () => {
     }));
   };
 
-  const handleAvatarUpload = () => {
-    // TODO: Implement avatar upload (Task 4.3)
-    Alert.alert('Coming Soon', 'Avatar upload will be available in the next update');
+  const handleAvatarUpload = async () => {
+    if (avatarUploading || !user?.id) return;
+
+    try {
+      setAvatarUploading(true);
+      setUploadProgress(null);
+
+      const result = await updateUserAvatar(
+        user.id,
+        (progress) => setUploadProgress(progress)
+      );
+
+      if (result.success && result.avatarUrl) {
+        // Update user store with new avatar URL
+        await updateProfile({ avatar: result.avatarUrl });
+        Alert.alert('Success', 'Profile picture updated successfully!');
+      } else if (result.error && result.error !== 'Upload cancelled') {
+        Alert.alert('Upload Failed', result.error);
+      }
+    } catch (error) {
+      console.error('Avatar upload error:', error);
+      Alert.alert('Upload Failed', 'Failed to update profile picture. Please try again.');
+    } finally {
+      setAvatarUploading(false);
+      setUploadProgress(null);
+    }
   };
 
   const handleSave = async () => {
@@ -326,6 +352,7 @@ export const EditProfileScreen: React.FC = () => {
         <TouchableOpacity
           style={styles.avatarTouchable}
           onPress={handleAvatarUpload}
+          disabled={avatarUploading}
           testID="avatar-upload-button"
         >
           {avatarUri && !avatarError ? (
@@ -341,8 +368,26 @@ export const EditProfileScreen: React.FC = () => {
           )}
           
           <View style={styles.avatarOverlay}>
-            <Text style={styles.avatarOverlayText}>Change</Text>
+            <Text style={styles.avatarOverlayText}>
+              {avatarUploading ? 'Uploading...' : 'Change'}
+            </Text>
           </View>
+          
+          {uploadProgress && (
+            <View style={styles.uploadProgressContainer}>
+              <View style={styles.uploadProgressBar}>
+                <View 
+                  style={[
+                    styles.uploadProgressFill,
+                    { width: `${uploadProgress.percentage}%` }
+                  ]} 
+                />
+              </View>
+              <Text style={styles.uploadProgressText}>
+                {uploadProgress.percentage}%
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
     </Card>
@@ -864,6 +909,33 @@ const styles = StyleSheet.create({
   
   saveButton: {
     flex: 1,
+  },
+  
+  uploadProgressContainer: {
+    position: 'absolute',
+    bottom: -30,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    gap: metalPortalSpacing.base['1'],
+  },
+  
+  uploadProgressBar: {
+    width: 80,
+    height: 4,
+    backgroundColor: metalPortalColors.semantic.background.secondary,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  
+  uploadProgressFill: {
+    height: '100%',
+    backgroundColor: metalPortalColors.semantic.interactive.primary,
+  },
+  
+  uploadProgressText: {
+    fontSize: 10,
+    color: metalPortalColors.semantic.text.muted,
   },
 });
 
