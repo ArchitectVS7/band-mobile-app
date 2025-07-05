@@ -1,8 +1,9 @@
 // Authentication types
 
 export interface LoginCredentials {
-  email: string;
+  identifier: string; // email or username
   password: string;
+  rememberMe?: boolean;
 }
 
 export interface RegisterCredentials {
@@ -11,6 +12,9 @@ export interface RegisterCredentials {
   password: string;
   displayName?: string;
 }
+
+// Alias for backward compatibility
+export type RegisterData = RegisterCredentials;
 
 export interface AuthUser {
   id: string;
@@ -34,8 +38,18 @@ export interface AuthTokens {
 
 export interface AuthResponse {
   user: AuthUser;
-  tokens: AuthTokens;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
 }
+
+export interface RefreshTokenResponse {
+  accessToken: string;
+  expiresIn: number;
+}
+
+// Alias for backward compatibility
+export type User = AuthUser;
 
 export interface ResetPasswordRequest {
   email: string;

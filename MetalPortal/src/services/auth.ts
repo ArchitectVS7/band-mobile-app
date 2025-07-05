@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { prisma } from './prisma';
 import { apiClient } from './api';
-import { authStore } from '../store/authStore';
+import { useAuthStore } from '../store/authStore';
 import type { LoginCredentials, RegisterData, AuthResponse, User, RefreshTokenResponse } from '../types/auth';
 
 /**
@@ -52,23 +52,13 @@ class AuthService {
 
   /**
    * REGISTER NEW USER
-   * 
-   * Process:
-   * 1. Validate input data
-   * 2. Check if user already exists
-   * 3. Hash password with bcrypt
-   * 4. Create user in database
-   * 5. Generate JWT tokens
-   * 6. Return authentication response
    */
   async register(data: RegisterData): Promise<AuthResponse> {
     try {
-      // Input validation
       if (!data.email || !data.password || !data.username) {
         throw new Error('Email, username, and password are required');
       }
 
-      // Check if user already exists
       const existingUser = await prisma.user.findFirst({
         where: {
           OR: [
@@ -82,18 +72,14 @@ class AuthService {
         throw new Error('User with this email or username already exists');
       }
 
-      // Hash password using bcrypt
-      // Salt rounds = 12 provides good security/performance balance
       const passwordHash = await bcrypt.hash(data.password, this.SALT_ROUNDS);
 
-      // Create user in database
       const user = await prisma.user.create({
         data: {
           email: data.email,
           username: data.username,
           passwordHash,
           displayName: data.displayName || data.username,
-          // Default values set by Prisma schema
         },
         select: {
           id: true,
@@ -102,47 +88,40 @@ class AuthService {
           displayName: true,
           role: true,
           subscriptionTier: true,
+          subscriptionStatus: true,
           avatar: true,
+          isVerified: true,
           createdAt: true,
+          updatedAt: true,
         }
       });
 
-      // Generate JWT tokens
       const { accessToken, refreshToken } = this.generateTokens(user);
-
-      // Store refresh token in database
       await this.storeRefreshToken(user.id, refreshToken);
-
-      // Update last active timestamp
       await prisma.user.update({
         where: { id: user.id },
         data: { lastActiveAt: new Date() }
       });
 
+      // Convert null to undefined for TypeScript compatibility
+      const formattedUser = this.formatUserForResponse(user);
+
       return {
-        user,
+        user: formattedUser,
         accessToken,
         refreshToken,
         expiresIn: this.parseExpiryToSeconds(this.ACCESS_TOKEN_EXPIRY),
       };
     } catch (error) {
-      throw new Error(`Registration failed: ${error.message}`);
+      throw new Error(`Registration failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
    * LOGIN USER
-   * 
-   * Process:
-   * 1. Find user by email/username
-   * 2. Verify password with bcrypt
-   * 3. Generate new JWT tokens
-   * 4. Update user activity
-   * 5. Return authentication response
    */
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     try {
-      // Find user by email or username
       const user = await prisma.user.findFirst({
         where: {
           OR: [
@@ -156,59 +135,40 @@ class AuthService {
         throw new Error('Invalid credentials');
       }
 
-      // Verify password using bcrypt
       const isValidPassword = await bcrypt.compare(credentials.password, user.passwordHash);
       
       if (!isValidPassword) {
         throw new Error('Invalid credentials');
       }
 
-      // Generate new JWT tokens
       const { accessToken, refreshToken } = this.generateTokens(user);
-
-      // Store refresh token in database
       await this.storeRefreshToken(user.id, refreshToken);
-
-      // Update last active timestamp
       await prisma.user.update({
         where: { id: user.id },
         data: { lastActiveAt: new Date() }
       });
 
-      // Return user data without password hash
       const { passwordHash, ...userWithoutPassword } = user;
+      const formattedUser = this.formatUserForResponse(userWithoutPassword);
 
       return {
-        user: userWithoutPassword,
+        user: formattedUser,
         accessToken,
         refreshToken,
         expiresIn: this.parseExpiryToSeconds(this.ACCESS_TOKEN_EXPIRY),
       };
     } catch (error) {
-      throw new Error(`Login failed: ${error.message}`);
+      throw new Error(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
    * REFRESH ACCESS TOKEN
-   * 
-   * JWT Refresh Pattern Explained:
-   * - Access tokens expire quickly for security
-   * - Refresh tokens last longer but are stored server-side
-   * - When access token expires, use refresh token to get new access token
-   * - If refresh token is invalid/expired, user must login again
-   * 
-   * Security Benefits:
-   * - Limits exposure window of compromised access tokens
-   * - Allows server-side revocation of refresh tokens
-   * - Maintains user session without frequent logins
    */
   async refreshToken(refreshToken: string): Promise<RefreshTokenResponse> {
     try {
-      // Verify refresh token signature
       const decoded = jwt.verify(refreshToken, this.REFRESH_SECRET) as any;
       
-      // Find user and verify refresh token is stored
       const user = await prisma.user.findFirst({
         where: {
           id: decoded.sub,
@@ -220,10 +180,8 @@ class AuthService {
         throw new Error('Invalid refresh token');
       }
 
-      // Generate new access token
       const newAccessToken = this.generateAccessToken(user);
 
-      // Update last active timestamp
       await prisma.user.update({
         where: { id: user.id },
         data: { lastActiveAt: new Date() }
@@ -234,38 +192,28 @@ class AuthService {
         expiresIn: this.parseExpiryToSeconds(this.ACCESS_TOKEN_EXPIRY),
       };
     } catch (error) {
-      throw new Error(`Token refresh failed: ${error.message}`);
+      throw new Error(`Token refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
    * LOGOUT USER
-   * 
-   * Process:
-   * 1. Invalidate refresh token in database
-   * 2. Clear tokens from client storage
-   * 3. Update user session status
    */
   async logout(userId: string): Promise<void> {
     try {
-      // Remove refresh token from database
       await prisma.user.update({
         where: { id: userId },
         data: { refreshToken: null }
       });
 
-      // Clear tokens from auth store
-      authStore.getState().logout();
+      useAuthStore.getState().logout();
     } catch (error) {
-      throw new Error(`Logout failed: ${error.message}`);
+      throw new Error(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
    * VERIFY ACCESS TOKEN
-   * 
-   * Used by API middleware to validate requests
-   * Returns decoded user claims if valid
    */
   async verifyAccessToken(token: string): Promise<any> {
     try {
@@ -278,9 +226,6 @@ class AuthService {
 
   /**
    * GET CURRENT USER
-   * 
-   * Fetch fresh user data from database
-   * Used after token refresh or profile updates
    */
   async getCurrentUser(userId: string): Promise<User> {
     try {
@@ -293,11 +238,13 @@ class AuthService {
           displayName: true,
           role: true,
           subscriptionTier: true,
+          subscriptionStatus: true,
           avatar: true,
           bio: true,
           location: true,
           isVerified: true,
           createdAt: true,
+          updatedAt: true,
           lastActiveAt: true,
         }
       });
@@ -306,9 +253,9 @@ class AuthService {
         throw new Error('User not found');
       }
 
-      return user;
+      return this.formatUserForResponse(user);
     } catch (error) {
-      throw new Error(`Failed to get user: ${error.message}`);
+      throw new Error(`Failed to get user: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -317,21 +264,29 @@ class AuthService {
    */
 
   /**
+   * Format user data for response (convert null to undefined)
+   */
+  private formatUserForResponse(user: any): any {
+    return {
+      ...user,
+      displayName: user.displayName || undefined,
+      avatar: user.avatar || undefined,
+      bio: user.bio || undefined,
+      location: user.location || undefined,
+    };
+  }
+
+  /**
    * Generate JWT Tokens
-   * 
-   * Creates both access and refresh tokens with appropriate claims
    */
   private generateTokens(user: any): { accessToken: string; refreshToken: string } {
     const accessToken = this.generateAccessToken(user);
     const refreshToken = this.generateRefreshToken(user);
-
     return { accessToken, refreshToken };
   }
 
   /**
    * Generate Access Token
-   * 
-   * Short-lived token with user claims for API authorization
    */
   private generateAccessToken(user: any): string {
     return jwt.sign(
@@ -349,8 +304,6 @@ class AuthService {
 
   /**
    * Generate Refresh Token
-   * 
-   * Long-lived token for obtaining new access tokens
    */
   private generateRefreshToken(user: any): string {
     return jwt.sign(
@@ -365,8 +318,6 @@ class AuthService {
 
   /**
    * Store Refresh Token
-   * 
-   * Save refresh token to database for validation
    */
   private async storeRefreshToken(userId: string, refreshToken: string): Promise<void> {
     await prisma.user.update({
@@ -377,19 +328,16 @@ class AuthService {
 
   /**
    * Parse Expiry to Seconds
-   * 
-   * Convert JWT expiry format to seconds for client use
    */
   private parseExpiryToSeconds(expiry: string): number {
     const match = expiry.match(/(\d+)([smhd])/);
-    if (!match) return 900; // Default 15 minutes
+    if (!match) return 900;
 
     const [, value, unit] = match;
-    const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
+    const multipliers: { [key: string]: number } = { s: 1, m: 60, h: 3600, d: 86400 };
     return parseInt(value) * multipliers[unit];
   }
 }
 
-// Export singleton instance
 export const authService = new AuthService();
 export default authService;

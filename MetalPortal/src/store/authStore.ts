@@ -88,8 +88,8 @@ export const useAuthStore = create<AuthStore>()(
           // Mock implementation for now
           const mockUser: AuthUser = {
             id: '1',
-            email: credentials.email,
-            username: credentials.email.split('@')[0],
+            email: credentials.identifier,
+            username: credentials.identifier.split('@')[0],
             displayName: 'Test User',
             role: UserRole.FAN,
             subscriptionTier: SubscriptionTier.FREE,
