@@ -1,0 +1,603 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================
+// ENUMS
+// ========================
+
+enum UserRole {
+  GUEST
+  FAN
+  PREMIUM_FAN
+  VIP_FAN
+  MODERATOR
+  BAND_MEMBER
+  ADMIN
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  VIP
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAUSED
+}
+
+enum PostType {
+  ANNOUNCEMENT
+  MEDIA_RELEASE
+  EVENT
+  MERCHANDISE
+  GENERAL
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  DELETED
+}
+
+enum ContentAccessLevel {
+  PUBLIC
+  FAN_ONLY
+  PREMIUM_ONLY
+  VIP_ONLY
+  BAND_ONLY
+}
+
+enum EventType {
+  CONCERT
+  MEET_GREET
+  LISTENING_PARTY
+  INTERVIEW
+  LIVESTREAM
+}
+
+enum EventStatus {
+  UPCOMING
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+}
+
+enum NotificationType {
+  NEW_POST
+  NEW_MESSAGE
+  EVENT_REMINDER
+  SUBSCRIPTION_UPDATE
+  MENTION
+  REACTION
+  SYSTEM
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  ROCK_ON
+  HEADBANG
+  FIRE
+  SKULL
+}
+
+// ========================
+// CORE MODELS
+// ========================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  username      String   @unique
+  passwordHash  String
+  role          UserRole @default(FAN)
+  
+  // Profile Information
+  displayName   String?
+  bio           String?
+  location      String?
+  favoriteGenres String[]
+  avatar        String?
+  isVerified    Boolean  @default(false)
+  
+  // Subscription Information
+  subscriptionTier   SubscriptionTier @default(FREE)
+  subscriptionStatus SubscriptionStatus @default(ACTIVE)
+  subscriptionId     String?
+  
+  // Authentication
+  refreshToken       String?
+  emailVerified      Boolean  @default(false)
+  emailVerificationToken String?
+  passwordResetToken String?
+  passwordResetExpiry DateTime?
+  
+  // Privacy Settings
+  profileVisibility  String   @default("public") // public, fans_only, private
+  allowDirectMessages Boolean  @default(true)
+  allowMentions      Boolean  @default(true)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastActiveAt DateTime @default(now())
+  
+  // Relations
+  posts            Post[]
+  comments         Comment[]
+  reactions        Reaction[]
+  forumPosts       ForumPost[]
+  forumComments    ForumComment[]
+  sentMessages     Message[] @relation("MessageSender")
+  receivedMessages Message[] @relation("MessageReceiver")
+  chatMessages     ChatMessage[]
+  eventRSVPs       EventRSVP[]
+  subscriptions    Subscription[]
+  notifications    Notification[]
+  reports          Report[]
+  userSessions     UserSession[]
+  
+  @@map("users")
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  userId          String
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  tier            SubscriptionTier
+  status          SubscriptionStatus
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean @default(false)
+  
+  // Payment Information
+  amount          Int // in cents
+  currency        String @default("usd")
+  interval        String // month, year
+  
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  user            User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("subscriptions")
+}
+
+model Post {
+  id          String            @id @default(cuid())
+  title       String
+  content     String?
+  excerpt     String?
+  type        PostType
+  status      PostStatus        @default(DRAFT)
+  accessLevel ContentAccessLevel @default(PUBLIC)
+  
+  // Media
+  featuredImage String?
+  mediaUrls     String[]
+  
+  // SEO and Organization
+  slug        String            @unique
+  tags        String[]
+  category    String?
+  
+  // Engagement
+  viewCount   Int               @default(0)
+  likeCount   Int               @default(0)
+  shareCount  Int               @default(0)
+  
+  // Publishing
+  publishedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  
+  // Author Information
+  authorId    String
+  author      User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  // Relations
+  comments    Comment[]
+  reactions   Reaction[]
+  
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  postId    String
+  authorId  String
+  parentId  String?  // For nested comments
+  
+  // Engagement
+  likeCount Int      @default(0)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  reactions Reaction[]
+  
+  @@map("comments")
+}
+
+model Reaction {
+  id        String       @id @default(cuid())
+  type      ReactionType
+  userId    String
+  postId    String?
+  commentId String?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, postId, type])
+  @@unique([userId, commentId, type])
+  @@map("reactions")
+}
+
+// ========================
+// FORUM MODELS
+// ========================
+
+model ForumCategory {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  slug        String   @unique
+  icon        String?
+  color       String?
+  
+  // Access Control
+  accessLevel ContentAccessLevel @default(PUBLIC)
+  
+  // Organization
+  sortOrder   Int      @default(0)
+  isVisible   Boolean  @default(true)
+  
+  // Statistics
+  postCount   Int      @default(0)
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  posts       ForumPost[]
+  
+  @@map("forum_categories")
+}
+
+model ForumPost {
+  id         String   @id @default(cuid())
+  title      String
+  content    String
+  categoryId String
+  authorId   String
+  
+  // Engagement
+  viewCount  Int      @default(0)
+  likeCount  Int      @default(0)
+  replyCount Int      @default(0)
+  
+  // Moderation
+  isPinned   Boolean  @default(false)
+  isLocked   Boolean  @default(false)
+  
+  // Timestamps
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  category   ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  author     User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments   ForumComment[]
+  
+  @@map("forum_posts")
+}
+
+model ForumComment {
+  id        String   @id @default(cuid())
+  content   String
+  postId    String
+  authorId  String
+  parentId  String?  // For nested comments
+  
+  // Engagement
+  likeCount Int      @default(0)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  post      ForumPost     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    ForumComment? @relation("ForumCommentReplies", fields: [parentId], references: [id])
+  replies   ForumComment[] @relation("ForumCommentReplies")
+  
+  @@map("forum_comments")
+}
+
+// ========================
+// MESSAGING MODELS
+// ========================
+
+model Message {
+  id         String      @id @default(cuid())
+  content    String
+  type       MessageType @default(TEXT)
+  senderId   String
+  receiverId String
+  
+  // Media
+  mediaUrl   String?
+  
+  // Status
+  isRead     Boolean     @default(false)
+  isDeleted  Boolean     @default(false)
+  
+  // Timestamps
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  
+  // Relations
+  sender     User        @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User        @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  
+  @@map("messages")
+}
+
+model ChatRoom {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isPrivate   Boolean  @default(false)
+  
+  // Access Control
+  accessLevel ContentAccessLevel @default(PUBLIC)
+  
+  // Settings
+  maxUsers    Int?
+  isActive    Boolean  @default(true)
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  messages    ChatMessage[]
+  
+  @@map("chat_rooms")
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  content   String
+  type      MessageType @default(TEXT)
+  roomId    String
+  userId    String
+  
+  // Media
+  mediaUrl  String?
+  
+  // Status
+  isDeleted Boolean     @default(false)
+  
+  // Timestamps
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  
+  // Relations
+  room      ChatRoom    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("chat_messages")
+}
+
+// ========================
+// EVENT MODELS
+// ========================
+
+model Event {
+  id             String      @id @default(cuid())
+  title          String
+  description    String?
+  type           EventType
+  status         EventStatus @default(UPCOMING)
+  
+  // Event Details
+  startDate      DateTime
+  endDate        DateTime?
+  location       String?
+  venue          String?
+  ticketUrl      String?
+  
+  // Access Control
+  accessLevel    ContentAccessLevel @default(PUBLIC)
+  maxAttendees   Int?
+  
+  // Media
+  bannerImage    String?
+  mediaUrls      String[]
+  
+  // Engagement
+  viewCount      Int         @default(0)
+  attendeeCount  Int         @default(0)
+  
+  // Timestamps
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  
+  // Relations
+  rsvps          EventRSVP[]
+  
+  @@map("events")
+}
+
+model EventRSVP {
+  id        String   @id @default(cuid())
+  eventId   String
+  userId    String
+  status    String   @default("attending") // attending, maybe, not_attending
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([eventId, userId])
+  @@map("event_rsvps")
+}
+
+// ========================
+// NOTIFICATION MODELS
+// ========================
+
+model Notification {
+  id        String           @id @default(cuid())
+  type      NotificationType
+  title     String
+  content   String
+  userId    String
+  
+  // Metadata
+  metadata  Json?
+  
+  // Status
+  isRead    Boolean          @default(false)
+  
+  // Timestamps
+  createdAt DateTime         @default(now())
+  
+  // Relations
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("notifications")
+}
+
+// ========================
+// MODERATION MODELS
+// ========================
+
+model Report {
+  id          String   @id @default(cuid())
+  reason      String
+  description String?
+  reporterId  String
+  
+  // Reported Content
+  postId      String?
+  commentId   String?
+  userId      String?
+  
+  // Status
+  status      String   @default("pending") // pending, reviewed, resolved, dismissed
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  reporter    User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  
+  @@map("reports")
+}
+
+// ========================
+// SESSION MODELS
+// ========================
+
+model UserSession {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  
+  // Session Info
+  ipAddress String?
+  userAgent String?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("user_sessions")
+}
+
+// ========================
+// ANALYTICS MODELS
+// ========================
+
+model Analytics {
+  id        String   @id @default(cuid())
+  event     String
+  userId    String?
+  
+  // Event Data
+  metadata  Json?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  @@map("analytics")
+}
+
+// ========================
+// SYSTEM MODELS
+// ========================
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("system_config")
+}
